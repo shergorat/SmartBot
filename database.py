@@ -57,6 +57,7 @@ class Database:
                 )
             ''')
             await conn.commit()
+            logging.info("Database was successfully initialized")
 
     async def add_new_user(self, user_id):
         current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

@@ -1,3 +1,4 @@
+import logging
 from typing import Match, Optional, Any, List
 import os
 import re
@@ -37,7 +38,7 @@ async def openai_request(prompt):
 
         return message
     except Exception as e:
-        print(e, ' - error\n !!!!!!!!!!!!!!!!!!!!')
+        logging.error(f'ERROR OPENAI REQUEST: {e}')
         raise e
 
 
@@ -74,7 +75,7 @@ async def unmute_user(chat_id: int, user_id: int) -> Any:
             print(f'{user_id} не был в базе спамеров, {e}')
         return "User unmuted successfully."
     except Exception as e:
-        print(f'{user_id} не удалось размутить, {e}')
+        logging.error(f"Failed to unmute user {user_id}: {e}")
         return "Failed to unmute user."
 
 
@@ -86,6 +87,7 @@ async def get_gpt_check_words(file_name: str = 'gpt_check_words.txt') -> List[st
             check_words = [word.strip().lower() for word in file if word.strip()]
         return check_words
     except Exception as e:
+        logging.error(f'ERROR READING FILE "{file_name}": {e}')
         raise ValueError(f'ERROR READING FILE "{file_name}": {e}\n{e.with_traceback}')
 
 
@@ -97,6 +99,7 @@ async def get_ban_words(file_name: str = 'ban_words.txt') -> List[str]:
             ban_words = [word.strip().lower() for word in file if word.strip()]
         return ban_words
     except Exception as e:
+        logging.error(f'ERROR READING FILE "{file_name}": {e}')
         raise ValueError(f'ERROR READING FILE "{file_name}": {e.text}\n{e.with_traceback}')
 
 

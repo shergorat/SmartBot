@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import types, Dispatcher
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
@@ -17,6 +19,7 @@ class BotState(StatesGroup):
 
 # @dp.message_handler(commands = ["start"], chat_type=ChatType.PRIVATE)
 async def on_start_private(message: types.Message, state: FSMContext):
+    logging.info(f"User {message.from_user.id} started bot")
     await state.finish()
     user_id = message.from_user.id
     if user_id in ADMIN_ID:
@@ -34,6 +37,8 @@ async def on_start_private(message: types.Message, state: FSMContext):
 
 # @dp.callback_query_handler(lambda query: query.data == "admin_panel")
 async def admin_panel(callback_query: types.CallbackQuery):
+    logging.info(f"User {callback_query.from_user.id} opened admin panel")
+
     message_text = "Выберите чат:"
     global ALLOWED_GROUPS
     ALLOWED_GROUPS = await db.get_allowed_groups()
@@ -47,11 +52,12 @@ async def admin_panel(callback_query: types.CallbackQuery):
             chat_button = types.InlineKeyboardButton(button_text, callback_data=button_callback)
             keyboard.add(chat_button)
         except ChatNotFound as e:
-            print(f'!!!!!!Чат {group_id[0]} не доступен!!!!!!')
+            logging.error(f"Chat {group_id[0]} not found: {e}")
             pass
-    api_model = load_api_model()
+    openai_api_model = load_api_model()
     add_chat_button = types.InlineKeyboardButton("Добавить чат", callback_data="add_new_chat")
-    model_button = types.InlineKeyboardButton(f"Модель: {api_model['openaimodel']}", callback_data="model_change")
+    model_button = types.InlineKeyboardButton(f"Модель: {openai_api_model['openaimodel']}",
+                                              callback_data="model_change")
 
     keyboard.add(add_chat_button, model_button)
 
@@ -62,6 +68,7 @@ async def admin_panel(callback_query: types.CallbackQuery):
 
 # @dp.callback_query_handler(lambda query: query.data == "add_new_chat")
 async def add_new_chat(callback_query: types.CallbackQuery):
+    logging.info(f"Received callback 'add_new_chat' by user {callback_query.from_user.id}")
     admin_button = types.InlineKeyboardButton("Вернуться", callback_data="return_to_admin")
     keyboard = types.InlineKeyboardMarkup().add(admin_button)
     await bot.edit_message_text(chat_id=callback_query.message.chat.id,
@@ -84,7 +91,9 @@ async def handle_chat_id_input(message: types.Message, state: FSMContext):
         await db.add_allowed_chat(int(chat_id))
         ALLOWED_GROUPS = await db.get_allowed_groups()
         await message.answer(f"Чат {chat_id} успешно добавлен", reply_markup=keyboard)
+        logging.info(f"User {message.from_user.id} successfully added chat {chat_id}")
     except Exception as e:
+        logging.error(f"Failed to add chat {chat_id}: {e}")
         await message.answer(
             f"Чат {chat_id} не удалось добавить. Ошибка - '{e}'\nУбедитесь, что передали корректный ID",
             reply_markup=keyboard)
@@ -92,11 +101,13 @@ async def handle_chat_id_input(message: types.Message, state: FSMContext):
 
 # @dp.callback_query_handler(lambda query: query.data.startswith("group_details_"))
 async def chat_details(callback_query: types.CallbackQuery):
+    logging.info(f"Received callback 'group_details' by user {callback_query.from_user.id}")
     chat_id = str(callback_query.data.split("_")[2])  # Получаем идентификатор чата из callback
     group_info = await bot.get_chat(str(chat_id))
     chat_description = group_info['title']
 
     if chat_description:
+        logging.info(f"Chat {chat_id} found: {chat_description}")
         # Создаем клавиатуру с кнопками "Удалить чат", "Изменить контекст" и "Вернуться"
         keyboard = types.InlineKeyboardMarkup()
         delete_button = types.InlineKeyboardButton("Удалить чат", callback_data=f"delete_chat_{chat_id}")
@@ -109,11 +120,13 @@ async def chat_details(callback_query: types.CallbackQuery):
                                     message_id=callback_query.message.message_id,
                                     text=f"Чат {chat_id}: {chat_description}", reply_markup=keyboard)
     else:
+        logging.info(f"Chat {chat_id} not found.")
         await bot.answer_callback_query(callback_query.id, text=f"Чат {chat_id} не найден.")
 
 
 # @dp.callback_query_handler(lambda query: query.data.startswith("delete_chat_"))
 async def delete_chat(callback_query: types.CallbackQuery):
+    logging.info(f"Received callback 'delete_chat' by user {callback_query.from_user.id}")
     chat_id = str(callback_query.data.split("_")[2])  # Получаем идентификатор чата из callback
     global ALLOWED_GROUPS
 
@@ -121,13 +134,16 @@ async def delete_chat(callback_query: types.CallbackQuery):
         await db.delete_allowed_group(int(chat_id))
         ALLOWED_GROUPS = await db.get_allowed_groups()
         await bot.answer_callback_query(callback_query.id, text=f"Чат {chat_id} удален.")
+        logging.info(f"Chat {chat_id} deleted.")
     except Exception as e:
+        logging.error(f"Failed to delete chat {chat_id}: {e}")
         await bot.answer_callback_query(callback_query.id, text=f"Чат {chat_id} не найден.")
         print(e, f'- не удалось удалить чат{chat_id}!')
 
 
 # @dp.callback_query_handler(lambda query: query.data.startswith("get_punishments_"))
 async def get_punishments(callback_query: types.CallbackQuery, state: FSMContext):
+    logging.info(f"Received callback 'get_punishments' by user {callback_query.from_user.id}")
     chat_id = str(callback_query.data.split("_")[2])  # Получаем идентификатор чата из callback
     admin_button = types.InlineKeyboardButton("Вернуться", callback_data="admin_panel")
     keyboard = types.InlineKeyboardMarkup().add(admin_button)
@@ -155,6 +171,7 @@ async def get_punishments(callback_query: types.CallbackQuery, state: FSMContext
 
 # @dp.callback_query_handler(lambda query: query.data == "model_change")
 async def model_change(callback_query: types.CallbackQuery):
+    logging.info(f"Received callback 'model_change' by user {callback_query.from_user.id}")
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton("GPT-3.5 Turbo", callback_data="choose_gpt_3.5_turbo"),
@@ -172,22 +189,27 @@ async def model_change(callback_query: types.CallbackQuery):
 
 # @dp.callback_query_handler(lambda query: query.data == "choose_gpt_3.5_turbo")
 async def choose_gpt_3_5_turbo(callback_query: types.CallbackQuery):
+    logging.info(f"Received callback 'choose_gpt_3.5_turbo' by user {callback_query.from_user.id}")
     # Обновляем значение модели в словаре
     api_model["openaimodel"] = "gpt-3.5-turbo"
     save_api_model(api_model)
+    logging.info(f"API model updated: {api_model}")
     await bot.answer_callback_query(callback_query.id, text="Модель изменена на GPT-3.5 Turbo")
 
 
 # @dp.callback_query_handler(lambda query: query.data == "choose_gpt_4")
 async def choose_gpt_4(callback_query: types.CallbackQuery):
+    logging.info(f"Received callback 'choose_gpt_4' by user {callback_query.from_user.id}")
     # Обновляем значение модели в словаре
     api_model["openaimodel"] = "gpt-4"
     save_api_model(api_model)
+    logging.info(f"API model updated: {api_model}")
     await bot.answer_callback_query(callback_query.id, text="Модель изменена на GPT-4")
 
 
-@dp.callback_query_handler(lambda query: query.data == "return_to_admin", state="*")
+# @dp.callback_query_handler(lambda query: query.data == "return_to_admin", state="*")
 async def return_to_admin_panel(callback_query: types.CallbackQuery, state: FSMContext):
+    logging.info(f"Received callback 'return_to_admin' by user {callback_query.from_user.id}")
     await callback_query.answer()
     await state.finish()
     await admin_panel(callback_query)
@@ -206,3 +228,4 @@ def register_handlers_private(dp: Dispatcher):
     dp.register_callback_query_handler(choose_gpt_3_5_turbo, lambda query: query.data == "choose_gpt_3.5_turbo")
     dp.register_callback_query_handler(choose_gpt_4, lambda query: query.data == "choose_gpt_4")
     dp.register_callback_query_handler(return_to_admin_panel, lambda query: query.data == "return_to_admin", state="*")
+    logging.info("Private handlers registered successfully")
