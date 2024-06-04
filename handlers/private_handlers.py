@@ -108,13 +108,16 @@ async def chat_details(callback_query: types.CallbackQuery):
 
     if chat_description:
         logging.info(f"Chat {chat_id} found: {chat_description}")
+        await db.add_chat_title(chat_id, chat_description)
         # Создаем клавиатуру с кнопками "Удалить чат", "Изменить контекст" и "Вернуться"
         keyboard = types.InlineKeyboardMarkup()
         delete_button = types.InlineKeyboardButton("Удалить чат", callback_data=f"delete_chat_{chat_id}")
         get_punishments_button = types.InlineKeyboardButton("Получить историю блокировок",
                                                             callback_data=f"get_punishments_{chat_id}")
         back_button = types.InlineKeyboardButton("Вернуться", callback_data="admin_panel")
-        keyboard.add(delete_button, get_punishments_button, back_button)
+        notification_settings_button = types.InlineKeyboardButton("Настройки уведомлений",
+                                                                  callback_data=f"notification_settings_{chat_id}")
+        keyboard.add(delete_button, get_punishments_button, notification_settings_button, back_button)
 
         await bot.edit_message_text(chat_id=callback_query.message.chat.id,
                                     message_id=callback_query.message.message_id,
@@ -187,6 +190,78 @@ async def model_change(callback_query: types.CallbackQuery):
     )
 
 
+# @dp.callback_query_handler(lambda query: query.data.startswith("notification_settings_"))
+async def notification_settings(callback_query: types.CallbackQuery):
+    logging.info(f"Received callback 'notification_settings' by user {callback_query.from_user.id}")
+    chat_id = int(callback_query.data.split("_")[2])
+    chat_info = await db.get_chat_info(chat_id=chat_id)
+    manual_punishment_notifications = chat_info['manual_punishment_notifications']
+    auto_punishment_notifications = chat_info['auto_punishment_notifications']
+    removal_punishment_notifications = chat_info['removal_punishment_notifications']
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(
+        types.InlineKeyboardButton("🟢" + " Aвтоматические наказания" if auto_punishment_notifications
+                                   else '🔴' + " Aвтоматические наказания",
+                                   callback_data=f"switch_auto_{chat_id}"),
+        types.InlineKeyboardButton("🟢" + " Ручные наказания" if manual_punishment_notifications
+                                   else '🔴' + " Ручные наказания",
+                                   callback_data=f"switch_manual_{chat_id}"),
+        types.InlineKeyboardButton("🟢" + " Снятие наказания" if removal_punishment_notifications
+                                   else '🔴' + " Удаление наказания",
+                                   callback_data=f"switch_removal_{chat_id}"),
+    )
+    keyboard.add(
+        types.InlineKeyboardButton("Вернуться", callback_data="admin_panel")
+    )
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        text=f"Настройки уведомлений для чата {chat_info['chat_title']}:",
+        reply_markup=keyboard
+    )
+
+
+async def update_notification_button_text(chat_id):
+    chat_info = await db.get_chat_info(chat_id=chat_id)
+    manual_punishment_notifications = chat_info['manual_punishment_notifications']
+    auto_punishment_notifications = chat_info['auto_punishment_notifications']
+    removal_punishment_notifications = chat_info['removal_punishment_notifications']
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(
+        types.InlineKeyboardButton("🟢" + " Aвтоматические наказания" if auto_punishment_notifications
+                                   else '🔴' + " Aвтоматические наказания",
+                                   callback_data=f"switch_auto_{chat_id}"),
+        types.InlineKeyboardButton("🟢" + " Ручные наказания" if manual_punishment_notifications
+                                   else '🔴' + " Ручные наказания",
+                                   callback_data=f"switch_manual_{chat_id}"),
+        types.InlineKeyboardButton("🟢" + " Снятие наказания" if removal_punishment_notifications
+                                   else '🔴' + " Удаление наказания",
+                                   callback_data=f"switch_removal_{chat_id}"),
+    )
+    keyboard.add(
+        types.InlineKeyboardButton("Вернуться", callback_data="admin_panel")
+    )
+
+    return keyboard
+
+
+# @dp.callback_query_handler(lambda query: query.data.startswith("switch_"))
+async def switch_notification_settings(callback_query: types.CallbackQuery):
+    logging.info(f"Received callback 'switch_notification_settings' by user {callback_query.from_user.id}")
+
+    data_parts = callback_query.data.split("_")
+    key = data_parts[1]
+    chat_id = data_parts[2]
+
+    await db.toggle_notification_setting(chat_id=chat_id, key=key)
+
+    keyboard = await update_notification_button_text(chat_id)
+
+    await bot.edit_message_reply_markup(callback_query.message.chat.id,
+                                        callback_query.message.message_id,
+                                        reply_markup=keyboard)
+
+
 # @dp.callback_query_handler(lambda query: query.data == "choose_gpt_3.5_turbo")
 async def choose_gpt_3_5_turbo(callback_query: types.CallbackQuery):
     logging.info(f"Received callback 'choose_gpt_3.5_turbo' by user {callback_query.from_user.id}")
@@ -228,4 +303,7 @@ def register_handlers_private(dp: Dispatcher):
     dp.register_callback_query_handler(choose_gpt_3_5_turbo, lambda query: query.data == "choose_gpt_3.5_turbo")
     dp.register_callback_query_handler(choose_gpt_4, lambda query: query.data == "choose_gpt_4")
     dp.register_callback_query_handler(return_to_admin_panel, lambda query: query.data == "return_to_admin", state="*")
-    logging.info("Private handlers registered successfully")
+    dp.register_callback_query_handler(notification_settings,
+                                       lambda query: query.data.startswith("notification_settings_"))
+    dp.register_callback_query_handler(switch_notification_settings, lambda query: query.data.startswith("switch_"))
+    logging.info("Private handlers registered")
