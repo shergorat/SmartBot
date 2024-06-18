@@ -171,6 +171,10 @@ async def payment_service(callback_query: types.CallbackQuery):
     service_title = service[1]
     service_description = service[2]
     service_price = service[3]
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    keyboard.add(types.InlineKeyboardButton(f"Заплатить {service_price} RUB", pay=True))
+    keyboard.add(types.InlineKeyboardButton("Отмена", callback_data="close_payment"))
+    # keyboard.add(types.InlineKeyboardButton("Cancel", pay=False))
     await bot.send_invoice(
         chat_id=callback_query.from_user.id,
         title=service_title,
@@ -179,7 +183,8 @@ async def payment_service(callback_query: types.CallbackQuery):
         provider_token=PAYMENT_TOKEN,
         currency='RUB',
         start_parameter='subscribe_bot',
-        prices=[types.LabeledPrice(label=service_title, amount=service_price * 100)]
+        prices=[types.LabeledPrice(label=service_title, amount=service_price * 100)],
+        reply_markup=keyboard
     )
 
 
@@ -494,6 +499,12 @@ async def return_to_start(callback_query: types.CallbackQuery, state: FSMContext
     await on_retry_to_start(callback_query, state)
 
 
+# @dp.callback_query_handler(lambda query: query.data == "close_payment", state="*")
+
+async def on_close_payment(callback_query: types.CallbackQuery):
+    await bot.delete_message(callback_query.message.chat.id, callback_query.message.message_id)
+
+
 def register_handlers_private(dp: Dispatcher):
     dp.register_message_handler(on_start_private, commands=["start"], chat_type=ChatType.PRIVATE)
     dp.register_callback_query_handler(admin_panel, lambda query: query.data == "admin_panel")
@@ -508,6 +519,7 @@ def register_handlers_private(dp: Dispatcher):
     dp.register_callback_query_handler(payment_service, lambda query: query.data.startswith("pay_service_"))
     dp.register_pre_checkout_query_handler(procces_pre_checkout_query, lambda query: True)
     dp.register_message_handler(process_successful_payment, content_types=types.ContentTypes.SUCCESSFUL_PAYMENT)
+    dp.register_callback_query_handler(on_close_payment, lambda query: query.data == "close_payment", state="*")
     dp.register_callback_query_handler(delete_chat, lambda query: query.data.startswith("delete_chat_"))
     dp.register_callback_query_handler(show_orders, lambda query: query.data == "orders_list")
     dp.register_callback_query_handler(get_punishments, lambda query: query.data.startswith("get_punishments_"))
