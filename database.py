@@ -64,6 +64,24 @@ class Database:
                     removal_punishment_notifications BOOLEAN DEFAULT TRUE
                 )
             ''')
+            await cursor.execute('''
+                            CREATE TABLE IF NOT EXISTS services (
+                                service_id INTEGER PRIMARY KEY,
+                                service_title STRING,
+                                service_description STRING,
+                                service_price INTEGER
+                            )
+                        ''')
+            await cursor.execute('''
+                                    CREATE TABLE IF NOT EXISTS orders (
+                                        order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                        service_id INTEGER,
+                                        user_id INTEGER,
+                                        username TEXT,
+                                        service_price INTEGER,
+                                        date DATATIME
+                                    )
+                                ''')
             await conn.commit()
             logging.info("Database was successfully initialized")
 
@@ -101,6 +119,15 @@ class Database:
             ''', (chat_id, current_date))
             await conn.commit()
 
+    async def add_order(self, service_id, user_id, username, service_price):
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        async with aiosqlite.connect(self.database_path) as conn:
+            await conn.execute('''
+                INSERT INTO orders (service_id, user_id, username, service_price, date)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (service_price, service_id, user_id, username, current_date))
+            await conn.commit()
+
     async def add_chat_title(self, chat_id, chat_title):
         async with aiosqlite.connect(self.database_path) as conn:
             await conn.execute('''
@@ -114,6 +141,27 @@ class Database:
             await cursor.execute('SELECT ALL chat_id FROM chat_base')
             allowed_chats = await cursor.fetchall()
             return allowed_chats
+
+    async def get_services(self):
+        async with aiosqlite.connect(self.database_path) as conn:
+            cursor = await conn.cursor()
+            await cursor.execute('SELECT * FROM services')
+            services = await cursor.fetchall()
+            return services
+
+    async def get_orders(self):
+        async with aiosqlite.connect(self.database_path) as conn:
+            cursor = await conn.cursor()
+            await cursor.execute('SELECT * FROM orders')
+            orders = await cursor.fetchall()
+            return orders
+
+    async def get_service(self, service_id):
+        async with aiosqlite.connect(self.database_path) as conn:
+            cursor = await conn.cursor()
+            await cursor.execute('SELECT * FROM services WHERE service_id = ?', (service_id,))
+            service = await cursor.fetchone()
+            return service
 
     async def get_chat_info(self, chat_id):
         async with aiosqlite.connect(self.database_path) as conn:

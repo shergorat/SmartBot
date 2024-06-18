@@ -1,5 +1,6 @@
 import re
 import logging
+import time
 from datetime import datetime, timedelta
 import asyncio
 from functools import partial
@@ -7,14 +8,14 @@ from functools import partial
 from aiogram import types
 from aiogram.dispatcher import Dispatcher
 from aiogram.dispatcher.filters import BoundFilter
-from aiogram.types import ChatMemberStatus
+from aiogram.types import ChatMemberStatus, ChatActions
 from aiogram.types import ChatType
 from aiogram.utils.callback_data import CallbackData
 
 import config
 from bot import bot, db
 from functions import (openai_request, has_ban_words, has_check_words, has_link, mute_user, unmute_user,
-                       save_message_in_db, get_link, get_reaction_count)
+                       save_message_in_db, get_link, get_reaction_count, openai_question)
 
 
 class AdminOrCreatorFilter(BoundFilter):
@@ -54,7 +55,7 @@ async def on_new_chat_member(message: types.Message):
             else:
                 logging.info(f"Chat {message.chat.title}, id: {message.chat.id} declined")
                 await message.answer(f"Чат *{chat_id}* не является одобренным \n"
-                                     "Свяжитесь с *@maxim_kuhar* для добавления вашего чата", parse_mode='Markdown')
+                                     "Свяжитесь с *@admin_username* для добавления вашего чата", parse_mode='Markdown')
                 await bot.leave_chat(chat_id)
 
         else:
@@ -72,6 +73,48 @@ async def on_left_chat_member(message: types.Message):
 
     await asyncio.sleep(1)
     await bot.delete_message(chat_id, message_id)
+
+
+# @dp.message_handler(commands=["q"], chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
+async def bot_question(message: types.Message):
+    user_message_id = message.message_id
+    chat_id = message.chat.id
+    await bot.send_chat_action(chat_id, ChatActions.TYPING)
+
+    command_parts = message.text.split()
+    if len(command_parts) > 2:
+        # Получаем текст вопроса, который идет после команды /q
+        question_text = " ".join(command_parts[1:])
+        print(question_text, '#')
+
+        try:
+            answer = await openai_question(question_text)
+            await message.reply(f"*Ответ*: \n{answer}", parse_mode='Markdown')
+            status = 'complete'
+            await db.insert_chat_message(chat_id, user_message_id, question_text, message.from_user.id,
+                                         message.from_user.username, status)
+        except Exception as e:
+            print(e.with_traceback, e, '-error!!!')
+            await message.answer(f"@{message.from_user.username} возникли технические неполадки.\n"
+                                 f"Я запомнил ваш вопрос и отвечу сразу, как появится возможность.",
+                                 parse_mode='HTML')
+            status = 'error'
+            await db.insert_chat_message(chat_id, user_message_id, question_text, message.from_user.id,
+                                         message.from_user.username, status)
+
+        await message.answer_chat_action(ChatActions.TYPING)
+
+    elif len(command_parts) == 1 or len(command_parts) == 0:
+        bot_message = await message.answer("Пожалуйста, задайте ваш вопрос после /q")
+        time.sleep(1.5)
+        await bot.delete_message(chat_id=message.chat.id, message_id=user_message_id)
+        await bot.delete_message(chat_id=message.chat.id, message_id=bot_message.message_id)
+
+    elif len(command_parts) == 2:
+        bot_message = await message.answer("Пожалуйста, задайте более осознаный вопрос")
+        time.sleep(1.5)
+        await bot.delete_message(chat_id=message.chat.id, message_id=user_message_id)
+        await bot.delete_message(chat_id=message.chat.id, message_id=bot_message.message_id)
 
 
 # @dp.message_handler(commands = ["m"], chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
@@ -261,83 +304,6 @@ async def report_command(message: types.Message):
         await message.reply("Команда должна быть ответом на сообщение, на которое вы хотите пожаловаться")
 
 
-# # @dp.message_handler(commands = ["vote"], chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
-# spam_callback_data = CallbackData("vote")
-#
-# votes = {}
-#
-#
-# async def vote_command(message: types.Message, dp: Dispatcher):
-#     if message.reply_to_message:
-#         try:
-#             # **Получаем информацию о сообщении и пользователе**
-#             target_user_id = message.reply_to_message.from_user.id
-#             target_message_id = message.reply_to_message.message_id
-#             target_message_text = message.reply_to_message.text
-#             target_chat_member = await bot.get_chat_member(message.chat.id, target_user_id)
-#
-#             # **Проверка на администраторов**
-#             if target_chat_member.status in (ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR):
-#                 logging.info('Cannot start vote against admin')
-#                 return
-#
-#             if target_message_id in votes:
-#                 await message.reply("Голосование за это сообщение уже было проведено")
-#                 return
-#
-#             votes[target_message_id] = (False, [])
-#             logging.info(f'!!!!!!!!!votes:{votes}')
-#             logging.info(f'!!$$$$$$$votes.target_message_id:{votes[target_message_id]}')
-#             vote_button = types.InlineKeyboardButton("Голосовать", callback_data=f"vote_{target_message_id}")
-#             keyboard = types.InlineKeyboardMarkup().add(vote_button)
-#
-#             await bot.send_message(chat_id=message.chat.id, reply_markup=keyboard,
-#                                    text="Нажмите на кнопку, если считаете, что данное сообщение недопустимо.",
-#                                    reply_to_message_id=target_message_id)
-#
-#             start_time = datetime.now()
-#             while (datetime.now() - start_time) < timedelta(minutes=0.5):
-#                 # **Ожидаем нажатия кнопки "Голосовать"**
-#                 @dp.callback_query_handler(lambda query: query.data.startswith(f"vote_{target_message_id}"))
-#                 async def vote_callback_handler(callback_query: types.CallbackQuery):
-#                     # **Проверка на голосование**
-#                     if target_user_id in votes.get(target_message_id, []):
-#                         await message.reply("Вы уже проголосовали за это сообщение.")
-#                         return
-#
-#                     # **Добавление голоса пользователя**
-#                     votes.setdefault(target_message_id, []).append(target_user_id)
-#                     logging.info(f'###############{votes} votes#############')
-#
-#                 vote_count = len(votes.get(target_message_id))
-#                 logging.info(f"Vote count: {vote_count}")
-#
-#                 if vote_count >= 3:
-#                     # Мьютим пользователя
-#                     await mute_user(chat_id=message.chat.id, user_id=target_user_id, mute_duration_days=1)
-#
-#                     # Сохраняем информацию о наказании
-#                     await db.insert_punishment(user_id=target_user_id,
-#                                                username=message.reply_to_message.from_user.username,
-#                                                chat_id=message.chat.id, message_text=target_message_text,
-#                                                reason='by peoples vote',
-#                                                source_reason='by peoples vote')
-#
-#                     # **Удаляем все сообщения бота**
-#                     await bot.delete_message(message.chat.id, [target_message_id, message.message_id])
-#                     break
-#
-#                 await asyncio.sleep(1)
-#
-#             bot.send_message(chat_id=message.chat.id, text="Голосование закончено")
-#
-#         except Exception as e:
-#             logging.error(f"Error processing /vote command: {e}")
-#
-#     else:
-#         await message.reply("Команда должна быть ответом на сообщение")
-
-
 # @dp.message_handler(content_types=types.ContentTypes.TEXT,
 #                     chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
 async def moderate_message(message: types.Message):
@@ -487,8 +453,8 @@ def register_handlers_group(dp: Dispatcher):
                                 chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
     dp.register_message_handler(report_command, commands=["report"],
                                 chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
-    # dp.register_message_handler(partial(vote_command, dp=dp), commands=["vote"],
-    #                             chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
+    dp.register_message_handler(bot_question, commands=["q"],
+                                chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
     dp.register_message_handler(moderate_message, content_types=types.ContentTypes.ANY,
                                 chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
     logging.info("Group handlers registered")

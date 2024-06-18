@@ -45,6 +45,32 @@ async def openai_request(prompt):
         raise e
 
 
+async def openai_question(prompt):
+    try:
+        response = openai.ChatCompletion.create(
+            model='gpt-3.5-turbo',
+            messages=[
+                {"role": "system", "content": API_ROLE},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.5,
+            max_tokens=1024,
+            n=1,
+            stop=":700",  # stop=None
+            # best_of = 3,
+        )
+        message = response['choices'][0]['message']['content']
+        print(message, 'ANSWER!!')
+        print(response['choices'][0]['finish_reason'], ' - finish reason ######')
+        if not message:
+            message = "Я не могу ответить на ваш вопрос. Пожалуйста, попробуйте переформулировать его."
+
+        return message
+    except Exception as e:
+        logging.error(f'ERROR OPENAI REQUEST: {e}')
+        raise e
+
+
 async def get_reaction_count(message: types.Message) -> int:
     reactions = await bot.get_messages_reactions(chat_id=message.chat.id, message_ids=[message.message_id])
     count = 0
@@ -100,6 +126,14 @@ async def unmute_user(chat_id: int, user_id: int) -> Any:
     except Exception as e:
         logging.error(f"Failed to unmute user {user_id}: {e}")
         return "Failed to unmute user."
+
+
+async def order_alert(admins_id, service_id: int):
+    for admin in admins_id:
+        try:
+            await bot.send_message(admin, f'Новый заказ услуги No{service_id} был создан')
+        except Exception as e:
+            print(e)
 
 
 async def get_gpt_check_words(file_name: str = 'gpt_check_words.txt') -> List[str]:
