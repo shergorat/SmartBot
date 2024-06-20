@@ -20,6 +20,9 @@ dp = Dispatcher(bot, storage=storage)
 
 async def on_startup(dp):
     await db.initialize()
+    from functions import get_models
+
+    await get_models()
 
 
 async def on_shutdown(dp):

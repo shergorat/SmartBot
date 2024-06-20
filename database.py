@@ -140,6 +140,7 @@ class Database:
             cursor = await conn.cursor()
             await cursor.execute('SELECT ALL chat_id FROM chat_base')
             allowed_chats = await cursor.fetchall()
+            allowed_chats = [chat[0] for chat in allowed_chats]
             return allowed_chats
 
     async def get_services(self):

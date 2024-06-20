@@ -15,7 +15,8 @@ from aiogram.utils.callback_data import CallbackData
 import config
 from bot import bot, db
 from functions import (openai_request, has_ban_words, has_check_words, has_link, mute_user, unmute_user,
-                       save_message_in_db, get_link, get_reaction_count, openai_question)
+                       save_message_in_db, get_link, get_reaction_count, openai_question, gptunnel_group_question,
+                       gptunnel_moderate_message)
 
 
 class AdminOrCreatorFilter(BoundFilter):
@@ -88,8 +89,15 @@ async def bot_question(message: types.Message):
         print(question_text, '#')
 
         try:
-            answer = await openai_question(question_text)
-            await message.reply(f"*Ответ*: \n{answer}", parse_mode='Markdown')
+            answer = await gptunnel_group_question(question_text)
+            if answer == 'check':
+                result = await moderate_message(message)
+                if result == 'ok':
+                    pass
+                else:
+                    return
+            await message.reply(
+                f"Ответ: \n{answer}\n\nЕсли вы хотите задать еще вопрос, то напишите его снова через команду '/q'")
             status = 'complete'
             await db.insert_chat_message(chat_id, user_message_id, question_text, message.from_user.id,
                                          message.from_user.username, status)
@@ -169,7 +177,7 @@ async def mute_command(message: types.Message):
         except Exception as e:
             raise ValueError('Не удалось найти пользователя для мута')
     else:
-        pass
+        await moderate_message(message)
 
 
 # @dp.message_handler(commands = ["b"], chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
@@ -222,7 +230,7 @@ async def ban_command(message: types.Message):
         except Exception as e:
             print(e.with_traceback, e, '-не удалось замутить пользователя!!!')
     else:
-        pass
+        await moderate_message(message)
 
 
 # @dp.message_handler(commands = ["um"], chat_type=(ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL))
@@ -230,7 +238,7 @@ async def unmute_command(message: types.Message):
     logging.info(f"Unmute command from user {message.from_user.username}, id: {message.from_user.id}")
     chat_member = await bot.get_chat_member(message.chat.id, message.from_user.id)
     if chat_member.status not in (ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR):
-        pass
+        await moderate_message(message)
     elif chat_member.status in (ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR):
         chat_id = message.chat.id
         user_id = None
@@ -270,7 +278,7 @@ async def report_command(message: types.Message):
             if chat_member.status in (ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR):
                 # тут можно вывести сообщение, мол на админов жаловаться не надо, но я посчитал это лишним
                 return
-            gpt_answer = await openai_request(message_text)
+            gpt_answer = await gptunnel_moderate_message(message_text)
             chat_info = await db.get_chat_info(chat_id=message.chat.id)
             auto_punishment_notifications = chat_info['auto_punishment_notifications']
             if gpt_answer == 'spam':
@@ -354,7 +362,7 @@ async def moderate_message(message: types.Message):
 
             if user_messages_count < config.MESSAGES_COUNT_ON_CHECK:
                 logging.info(f"New-member check for user {message.from_user.username}, id: {message.from_user.id}")
-                gpt_answer = await openai_request(message.text)
+                gpt_answer = await gptunnel_moderate_message(message.text)
                 if gpt_answer == 'spam':
                     logging.info(f"Message {message.message_id} from @{message.from_user.username} detected as spam")
                     if auto_punishment_notifications:
@@ -388,7 +396,7 @@ async def moderate_message(message: types.Message):
             if c_words is not None:
                 logging.info(f"Message {message.message_id} from @{message.from_user.username} "
                              f"has check-words. Start checking")
-                gpt_answer = await openai_request(message.text)
+                gpt_answer = await gptunnel_moderate_message(message.text)
                 if gpt_answer == 'spam':
                     logging.info(f"Message {message.message_id} from @{message.from_user.username} detected as spam")
                     if auto_punishment_notifications:
@@ -440,6 +448,8 @@ async def moderate_message(message: types.Message):
 
             else:
                 logging.info(f"Message {message.message_id} from @{message.from_user.username} is ok")
+                result = 'ok'
+                return result
 
 
 def register_handlers_group(dp: Dispatcher):

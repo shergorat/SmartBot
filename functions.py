@@ -3,6 +3,8 @@ import os
 import re
 from datetime import datetime, timedelta
 from typing import Match, Optional, Any, List
+
+import requests
 from fuzzywuzzy import fuzz
 
 import openai
@@ -18,11 +20,132 @@ from json_manager import load_api_model
 openai.api_key = OPENAI_API_KEY
 
 
+async def get_models():
+    try:
+        url = 'https://gptunnel.ru/v1/models'
+        headers = {
+            'Authorization': GPTUNNEL_API_KEY,  # Замените на ваш API ключ
+        }
+
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()  # Вызовет исключение для кода ответа 4xx/5xx
+
+        result = response.json()
+        print(result)
+        return result
+
+    except Exception as e:
+        logging.error(f'ERROR GETTING MODELS: {e}')
+        raise e
+
+
+async def gptunnel_private_question(prompt):
+    logging.info(f"Received prompt: {prompt}")
+    url = 'https://gptunnel.ru/v1/chat/completions'
+    headers = {
+        'Authorization': GPTUNNEL_API_KEY,  # Замените на ваш API ключ
+    }
+    data = {
+        "model": "gpt-3.5-turbo",
+        "useWalletBalance": True,
+        "messages": [
+            {"role": "system", "content": API_ROLE_PRIVATE},
+            {"role": "user", "content": prompt}
+        ],
+    }
+    try:
+        logging.info(f'send request to gptunnel')
+        response = requests.post(url, headers=headers, json=data)
+        logging.info(f'request to gptunnel done')
+        response.raise_for_status()  # Вызовет исключение для кода ответа 4xx/5xx
+
+        result = response.json()
+        print(result)
+        message = result['choices'][0]['message']['content']
+        print(message, 'ANSWER!!')
+        print(result['choices'][0]['finish_reason'], ' - finish reason ######')
+        if not message:
+            message = "Я не могу ответить на ваш вопрос. Пожалуйста, попробуйте переформулировать его."
+
+        return message
+
+    except Exception as e:
+        logging.error(f'ERROR GPTUNNEL REQUEST: {e}')
+        raise e
+
+
+async def gptunnel_group_question(prompt):
+    logging.info(f"Received prompt: {prompt}")
+    url = 'https://gptunnel.ru/v1/chat/completions'
+    headers = {
+        'Authorization': GPTUNNEL_API_KEY,  # Замените на ваш API ключ
+    }
+    data = {
+        "model": "gpt-3.5-turbo",
+        "useWalletBalance": True,
+        "messages": [
+            {"role": "system", "content": API_ROLE_GROUP},
+            {"role": "user", "content": prompt}
+        ],
+    }
+    try:
+        logging.info(f'send request to gptunnel')
+        response = requests.post(url, headers=headers, json=data)
+        logging.info(f'request to gptunnel done')
+        response.raise_for_status()  # Вызовет исключение для кода ответа 4xx/5xx
+
+        result = response.json()
+        print(result)
+        message = result['choices'][0]['message']['content']
+        print(message, 'ANSWER!!')
+        print(result['choices'][0]['finish_reason'], ' - finish reason ######')
+        if not message:
+            message = "Я не могу ответить на ваш вопрос. Пожалуйста, попробуйте переформулировать его."
+
+        return message
+
+    except Exception as e:
+        logging.error(f'ERROR GPTUNNEL REQUEST: {e}')
+        raise e
+
+
+async def gptunnel_moderate_message(prompt):
+    try:
+        url = 'https://gptunnel.ru/v1/chat/completions'
+        headers = {
+            'Authorization': GPTUNNEL_API_KEY,  # Замените на ваш API ключ
+        }
+        data = {
+            "model": "gpt-3.5-turbo",
+            "useWalletBalance": True,
+            "messages": [
+                {"role": "system", "content": API_PROMPT},
+                {"role": "user", "content": prompt}
+            ],
+        }
+
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()  # Вызовет исключение для кода ответа 4xx/5xx
+
+        result = response.json()
+        message = result['choices'][0]['message']['content']
+        print(message, 'ANSWER!!')
+        print(result['choices'][0]['finish_reason'], ' - finish reason ######')
+        if not message:
+            message = "Я не могу ответить на ваш вопрос. Пожалуйста, попробуйте переформулировать его."
+
+        return message
+
+    except Exception as e:
+        logging.error(f'ERROR GPTUNNEL REQUEST: {e}')
+        raise e
+
+
 async def openai_request(prompt):
     try:
         api_model = load_api_model()
         response = openai.ChatCompletion.create(
-            model=api_model['openaimodel'],
+            model='gpt-3.5',
             messages=[
                 {"role": "system", "content": API_PROMPT},
                 {"role": "user", "content": prompt}
@@ -48,7 +171,7 @@ async def openai_request(prompt):
 async def openai_question(prompt):
     try:
         response = openai.ChatCompletion.create(
-            model='gpt-3.5-turbo',
+            model='davinci-002',
             messages=[
                 {"role": "system", "content": API_ROLE},
                 {"role": "user", "content": prompt}
@@ -117,7 +240,8 @@ async def unmute_user(chat_id: int, user_id: int) -> Any:
     try:
         chats = await db.get_allowed_groups()
         for chat in chats:
-            await bot.restrict_chat_member(chat, user_id, permissions)
+            logging.info(f"Unmuting user {user_id} in chat {chat}")
+            await bot.restrict_chat_member(chat_id=chat, user_id=user_id, permissions=permissions)
         try:
             await db.remove_spamer(user_id)
         except Exception as e:

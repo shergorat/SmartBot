@@ -10,7 +10,7 @@ from aiogram.utils.exceptions import ChatNotFound
 
 from bot import bot, dp, db
 from config import *
-from functions import openai_question, order_alert
+from functions import openai_question, order_alert, gptunnel_private_question
 from json_manager import api_model, save_api_model, load_api_model
 
 ALLOWED_GROUPS = None
@@ -28,13 +28,14 @@ async def on_start_private(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     services_button = types.InlineKeyboardButton("Я хочу консультацию человека", callback_data="services")
     question_button = types.InlineKeyboardButton("Я хочу задать вопрос", callback_data="question")
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
 
     if user_id in ADMIN_ID:
         admin_button = types.InlineKeyboardButton("Админ-панель", callback_data="admin_panel")
 
-        keyboard = types.InlineKeyboardMarkup().add(admin_button, services_button, question_button)
+        keyboard.add(admin_button, services_button, question_button)
     else:
-        keyboard = types.InlineKeyboardMarkup().add(services_button, question_button)
+        keyboard.add(services_button, question_button)
 
     message_text = (
         "Привет! Это бот-помощник компании ЮрЮг\n"
@@ -47,15 +48,16 @@ async def on_retry_to_start(callback_query: types.CallbackQuery, state: FSMConte
     logging.info(f"User {callback_query.from_user.id} started bot")
     await state.finish()
     user_id = callback_query.from_user.id
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
     services_button = types.InlineKeyboardButton("Я хочу консультацию человека", callback_data="services")
     question_button = types.InlineKeyboardButton("Я хочу задать вопрос", callback_data="question")
 
     if user_id in ADMIN_ID:
         admin_button = types.InlineKeyboardButton("Админ-панель", callback_data="admin_panel")
 
-        keyboard = types.InlineKeyboardMarkup().add(admin_button, services_button, question_button)
+        keyboard.add(admin_button, services_button, question_button)
     else:
-        keyboard = types.InlineKeyboardMarkup().add(services_button, question_button)
+        keyboard.add(services_button, question_button)
 
     message_text = (
         "Привет! Это бот-помощник компании ЮрЮг\n"
@@ -87,33 +89,40 @@ async def bot_question(callback_query: types.CallbackQuery):
 async def handle_question(message: types.Message, state: FSMContext):
     question = message.text
     await state.update_data(question=question)  # Сохраняем идентификатор чата в состоянии FSM
+    services_button = types.InlineKeyboardButton("Я хочу консультацию человека", callback_data="services")
     return_button = types.InlineKeyboardButton("Вернуться", callback_data="return_to_start")
-    keyboard = types.InlineKeyboardMarkup().add(return_button)
-    await state.finish()
-
+    keyboard = types.InlineKeyboardMarkup()
     command_parts = message.text.split()
     if len(command_parts) > 2:
         question_text = " ".join(command_parts[0:])
         print(question_text, '#')
 
         try:
-            answer = await openai_question(question_text)
-            await message.reply(f"*Ответ*: \n{answer}", parse_mode='Markdown', reply_markup=keyboard)
+            answer = await gptunnel_private_question(question_text)
+            keyboard.add(services_button)
+            keyboard.add(return_button)
+            await message.reply(
+                f"Ответ: \n\n{answer}\n\nЕсли вы не хотите больше задавать вопросы, нажмите на кнопку 'Вернуться'",
+                reply_markup=keyboard)
             status = 'complete'
 
         except Exception as e:
             print(e.with_traceback, e, '-error!!!')
+            keyboard.add(return_button)
             await message.answer(f"@{message.from_user.username} возникли технические неполадки.\n"
                                  f"Я запомнил ваш вопрос и отвечу сразу, как появится возможность.",
                                  parse_mode='HTML', reply_markup=keyboard)
             status = 'error'
+            await state.finish()
 
     elif len(command_parts) == 2:
         await message.answer("Пожалуйста, задайте более осознанный вопрос", reply_markup=keyboard)
 
 
 # @dp.callback_query_handler(lambda query: query.data == "services")
-async def show_services(callback_query: types.CallbackQuery):
+async def show_services(callback_query: types.CallbackQuery, state: FSMContext):
+    await state.finish()
+
     message_text = "Выберите услугу:"
     services = await db.get_services()
 
@@ -214,23 +223,23 @@ async def process_successful_payment(message: types.Message):
 async def admin_panel(callback_query: types.CallbackQuery):
     logging.info(f"User {callback_query.from_user.id} opened admin panel")
 
-    message_text = "Выберите чат:"
+    message_text = "Выберите действие:"
     global ALLOWED_GROUPS
     ALLOWED_GROUPS = await db.get_allowed_groups()
     # Создаем inline-кнопки для каждого чата
-    keyboard = types.InlineKeyboardMarkup()
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
     for group_id in ALLOWED_GROUPS:
         try:
-            group_info = await bot.get_chat(str(group_id[0]))
-            button_text = group_info['title']
-            button_callback = f"group_details_{group_id[0]}"
+            group_info = await bot.get_chat(str(group_id))
+            button_text = f"Чат - {group_info['title']}"
+            button_callback = f"group_details_{group_id}"
             chat_button = types.InlineKeyboardButton(button_text, callback_data=button_callback)
             keyboard.add(chat_button)
         except ChatNotFound as e:
-            logging.error(f"Chat {group_id[0]} not found: {e}")
+            logging.error(f"Chat {group_id} not found: {e}")
             pass
     openai_api_model = load_api_model()
-    add_chat_button = types.InlineKeyboardButton("Добавить чат", callback_data="add_new_chat")
+    add_chat_button = types.InlineKeyboardButton("Добавить новый чат", callback_data="add_new_chat")
     model_button = types.InlineKeyboardButton(f"Модель: {openai_api_model['openaimodel']}",
                                               callback_data="model_change")
     orders_button = types.InlineKeyboardButton("Заказы", callback_data="orders_list")
@@ -259,8 +268,9 @@ async def show_orders(callback_query: types.CallbackQuery, state: FSMContext):
             message += f"Оплатил: {order[4]}\n"
             message += f"Дата: {order[5]}\n"
         print(message)
-        await bot.send_message(chat_id=callback_query.message.chat.id,
-                               text=message, reply_markup=keyboard)
+        await bot.edit_message_text(message_id=callback_query.message.message_id,
+                                    chat_id=callback_query.message.chat.id,
+                                    text=message, reply_markup=keyboard)
     else:
         await bot.send_message(callback_query.from_user.id, f"История заказов пуста.",
                                reply_markup=keyboard)
@@ -305,12 +315,12 @@ async def chat_details(callback_query: types.CallbackQuery):
     chat_id = str(callback_query.data.split("_")[2])  # Получаем идентификатор чата из callback
     group_info = await bot.get_chat(str(chat_id))
     chat_description = group_info['title']
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
 
     if chat_description:
         logging.info(f"Chat {chat_id} found: {chat_description}")
         await db.add_chat_title(chat_id, chat_description)
         # Создаем клавиатуру с кнопками "Удалить чат", "Изменить контекст" и "Вернуться"
-        keyboard = types.InlineKeyboardMarkup()
         delete_button = types.InlineKeyboardButton("Удалить чат", callback_data=f"delete_chat_{chat_id}")
         get_punishments_button = types.InlineKeyboardButton("Получить историю блокировок",
                                                             callback_data=f"get_punishments_{chat_id}")
@@ -509,7 +519,7 @@ def register_handlers_private(dp: Dispatcher):
     dp.register_message_handler(on_start_private, commands=["start"], chat_type=ChatType.PRIVATE)
     dp.register_callback_query_handler(admin_panel, lambda query: query.data == "admin_panel")
     dp.register_callback_query_handler(bot_question, lambda query: query.data == "question")
-    dp.register_callback_query_handler(show_services, lambda query: query.data == "services")
+    dp.register_callback_query_handler(show_services, lambda query: query.data == "services", state="*")
     dp.register_callback_query_handler(add_new_chat, lambda query: query.data == "add_new_chat")
     dp.register_message_handler(handle_chat_id_input, lambda message: message.text and message.from_user.id in ADMIN_ID,
                                 state=BotState.waiting_for_chat_id)
